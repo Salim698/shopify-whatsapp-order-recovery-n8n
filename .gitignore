@@ -1,0 +1,10 @@
+.env
+*.env
+!.env.example
+credentials*.json
+*service-account*.json
+*.pem
+.DS_Store
+node_modules/
+# Exports n8n bruts : à nettoyer avant de committer (voir CONTRIBUTING.md)
+*.raw.json

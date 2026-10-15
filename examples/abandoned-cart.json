@@ -1,0 +1,16 @@
+{
+  "id": 1000000001,
+  "customer": {
+    "first_name": "Awa",
+    "phone": "+22670000000"
+  },
+  "line_items": [
+    { "title": "Produit exemple" },
+    { "title": "Deuxième produit" }
+  ],
+  "total_price": "250.00",
+  "shipping_address": {
+    "city": "Ouagadougou"
+  },
+  "abandoned_checkout_url": "https://example-store.myshopify.com/checkouts/xxxxxxxx"
+}

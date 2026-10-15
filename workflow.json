@@ -1,0 +1,4347 @@
+{
+  "name": "Shopify Cart Recovery & Order Confirmation - WhatsApp x Gemini x Sheets",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "abandoned",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -5104,
+        -1472
+      ],
+      "id": "88cd1666-0bfe-44b6-8e6d-3899d49e6604",
+      "name": "🛒 Webhook Abandon"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $json.body || $json;\nconst body = raw.body || raw;\n\nlet phone = (body.phone || body.customer?.phone || \"\").toString();\nphone = phone.replace(/[\\s\\-\\.\\(\\)]/g, '');\n\n// Normalisation Burkina (226)\nif (phone.startsWith('00226')) phone = '226' + phone.slice(5);\nelse if (phone.startsWith('+226')) phone = '226' + phone.slice(4);\nelse if (phone.startsWith('0')) phone = '226' + phone.slice(1);\nelse if (!phone.startsWith('226')) phone = '226' + phone;\n\n// ✅ Validation adaptée Burkina (inclut 52, 6X, 7X)\nconst isValidPhone = /^226(5|6|7)[0-9]{7}$/.test(phone);\n\nconst total = parseFloat(body.total_price || body.subtotal_price || 0);\nconst items = body.line_items?.length || 1;\nconst ville = (body.shipping_address?.city || '').toLowerCase();\nconst orderId = body.id || Math.random().toString(36).substring(7);\n\nconst villesPremium = ['casablanca', 'rabat', 'marrakech', 'agadir', 'tanger'];\nconst villePremium = villesPremium.some(v => ville.includes(v));\n\nlet score, priorite;\nif (total >= 1000 || (total >= 500 && villePremium)) { score = 'PLATINUM'; priorite = 1; }\nelse if (total >= 500 || (total >= 300 && items >= 3)) { score = 'VIP'; priorite = 2; }\nelse if (total >= 200) { score = 'PREMIUM'; priorite = 3; }\nelse if (total >= 100) { score = 'NORMAL'; priorite = 4; }\nelse { score = 'RISQUE'; priorite = 5; }\n\nreturn [{\n  json: {\n    clean_phone: phone,\n    is_valid_phone: isValidPhone,\n    score,\n    priorite,\n    total_price: total,\n    order_id: orderId,\n    prenom: body.customer?.first_name || 'client',\n    produit: body.line_items?.[0]?.title || 'produit',\n    lien: body.abandoned_checkout_url || '#'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4432,
+        -1552
+      ],
+      "id": "45cbf891-fba5-4d3b-897a-5d5d11fb7f85",
+      "name": "📱 Clean + Score Abandon"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "418150de-42b2-43ba-bab7-84c10963d2ca",
+              "leftValue": "={{ $json.is_valid_phone }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -4000,
+        -1488
+      ],
+      "id": "128e18b0-87b3-4e55-8da6-583a9a3fdd49",
+      "name": "❌ Téléphone Invalide?"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Blacklist",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "phone",
+              "lookupValue": "=={{ $json.clean_phone }}"
+            }
+          ]
+        },
+        "options": {
+          "returnFirstMatch": true
+        }
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -3744,
+        -1536
+      ],
+      "id": "7cf8354e-b1f0-4649-a199-8dfc801dce8c",
+      "name": "🚫 Check Blacklist",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "5e11ef4d-e51a-49b2-a135-2c6847dc7ed3",
+              "leftValue": "={{ $json.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "array",
+                "operation": "lengthGt",
+                "rightType": "number"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -3008,
+        -1520
+      ],
+      "id": "d3876917-bda2-49d1-a215-1a357d811cc8",
+      "name": "Node IF Blacklist"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GREEN_API_URL }}/waInstance{{ $env.GREEN_API_INSTANCE }}/checkWhatsapp/{{ $env.GREEN_API_TOKEN }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"phoneNumber\": \"{{ $json.clean_phone }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -2752,
+        -1504
+      ],
+      "id": "3967ca5d-347f-4d7c-a10d-cc6a18ca1e12",
+      "name": "📲 Check WhatsApp"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "76cccb6b-ef79-44aa-9168-06e04582dacd",
+              "leftValue": "=={{ $json.existsWhatsapp }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -2416,
+        -1472
+      ],
+      "id": "b695645a-3c83-49e6-b303-79ad0709199c",
+      "name": "🤔 Has WhatsApp ?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GREEN_API_URL }}/waInstance{{ $env.GREEN_API_INSTANCE }}/sendMessage/{{ $env.GREEN_API_TOKEN }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chatId\": \"{{ $json.chatId }}\",\n  \"message\": \"👋 Bonjour {{ $json.prenom }}\\n\\n🛒 Vous avez oublié : {{ $json.produit }}\\n\\n👉 Finalisez ici : {{ $json.lien }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1760,
+        -1664
+      ],
+      "id": "0aa527dd-1f0e-4ba7-8825-7be10d4073b6",
+      "name": "💬 Send WhatsApp"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.twilio.com/2010-04-01/Accounts/ACCOUNT_SID/Messages.json",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"To\": \"{{ $json.clean_phone }}\",\n  \"From\": \"+1XXXXXXX\",\n  \"Body\": \"Votre panier vous attend 👉 {{ $json.lien }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1760,
+        -1264
+      ],
+      "id": "4107f5fc-bfae-47a7-955b-85862f3d6645",
+      "name": "📩 Send SMS",
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -1360,
+        -1552
+      ],
+      "id": "86b8acd8-ee42-4081-aa67-331634263143",
+      "name": "Merge",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GREEN_API_URL }}/waInstance{{ $env.GREEN_API_INSTANCE }}/sendMessage/{{ $env.GREEN_API_TOKEN }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chatId\": \"{{ $json.chatId }}\",\n  \"message\": \"👀 {{ $json.prenom }}, votre panier est toujours disponible !\\n👉 {{ $json.lien }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -4688,
+        -1024
+      ],
+      "id": "9d45d4e4-49f5-4f39-9bcd-1c0dbb03577c",
+      "name": "🔁 Relance 1"
+    },
+    {
+      "parameters": {
+        "amount": 6
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -4032,
+        -752
+      ],
+      "id": "a2f1784a-f41f-4cfa-b1b1-1145c4be268f",
+      "name": "⏱ Wait 6h"
+    },
+    {
+      "parameters": {
+        "amount": 10
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -1056,
+        -1536
+      ],
+      "id": "561f98f9-0526-47f9-8666-1e3f505d418c",
+      "name": "⏱ Wait 30min"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GREEN_API_URL }}/waInstance{{ $env.GREEN_API_INSTANCE }}/sendMessage/{{ $env.GREEN_API_TOKEN }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chatId\": \"{{ $json.chatId }}\",\n  \"message\": \"🔥 {{ $json.prenom }}, stock limité sur {{ $json.produit }} !\\nNe ratez pas votre chance 👉 {{ $json.lien }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -3200,
+        -704
+      ],
+      "id": "f3bd4cb1-7ef7-4515-bd5a-c93fc7dbcdf4",
+      "name": "RELANCE 2"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -2496,
+        -704
+      ],
+      "id": "89b6417e-03f8-4ef1-88da-8ba3d58667e8",
+      "name": "⏱ Wait 24h"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GREEN_API_URL }}/waInstance{{ $env.GREEN_API_INSTANCE }}/sendMessage/{{ $env.GREEN_API_TOKEN }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chatId\": \"{{ $json.chatId }}\",\n  \"message\": \"🎁 Dernière chance {{ $json.prenom }} !\\nProfitez de -10% avec code {{ $env.PROMO_CODE }}\\n👉 {{ $json.lien }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1488,
+        -784
+      ],
+      "id": "4125b674-af4e-4d8a-bd2f-a04201d37e94",
+      "name": "RELANCE 3 (FINAL)"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "order-created",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -7680,
+        -432
+      ],
+      "id": "207d7974-35ed-4a9a-b7ec-7bb2e40f72a9",
+      "name": "📦 Webhook Commande"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $json.body || $json;\nconst body = raw.body || raw;\n\nlet phone = (\n  body.phone ||\n  body.customer?.phone ||\n  body.body?.customer?.phone ||\n  \"\"\n).toString();\n\nphone = phone.replace(/[\\s\\-\\.\\(\\)]/g, '');\n\nif (phone.startsWith('00226')) phone = '226' + phone.slice(5);\nelse if (phone.startsWith('+226')) phone = '226' + phone.slice(4);\nelse if (phone.startsWith('0')) phone = '226' + phone.slice(1);\nelse if (!phone.startsWith('226')) phone = '226' + phone;\n\nconst isValidPhone = /^226(5|6|7)[0-9]{7}$/.test(phone);\n\nconst total = parseFloat(body.total_price || body.subtotal_price || body.body?.total_price || 0);\nconst items = body.line_items?.length || body.body?.line_items?.length || 1;\nconst ville = (body.shipping_address?.city || body.body?.shipping_address?.city || '').toLowerCase();\nconst orderId = body.id || Math.random().toString(36).substring(7);\n\nlet score, priorite;\nif (total >= 1000) { score = 'PLATINUM'; priorite = 1; }\nelse if (total >= 500) { score = 'VIP'; priorite = 2; }\nelse if (total >= 200) { score = 'PREMIUM'; priorite = 3; }\nelse if (total >= 100) { score = 'NORMAL'; priorite = 4; }\nelse { score = 'RISQUE'; priorite = 5; }\n\nreturn [{\n  json: {\n    clean_phone: phone,\n    is_valid_phone: isValidPhone,\n    score,\n    priorite,\n    total_price: total,\n    order_id: orderId,\n    prenom: body.customer?.first_name || body.body?.customer?.first_name || 'client',\n    produit: body.line_items?.[0]?.title || body.body?.line_items?.[0]?.title || 'produit',\n    lien: body.abandoned_checkout_url || body.body?.abandoned_checkout_url || '#'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -7376,
+        -368
+      ],
+      "id": "ca52236d-1efa-4781-8038-280c1fd7b756",
+      "name": "🧠 Clean + Score Commande"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "418150de-42b2-43ba-bab7-84c10963d2ca",
+              "leftValue": "={{ $json.is_valid_phone }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -7136,
+        -384
+      ],
+      "id": "bcf179e1-9a46-4a58-934e-325d228a59e6",
+      "name": "❌ Téléphone Invalide?1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "5e11ef4d-e51a-49b2-a135-2c6847dc7ed3",
+              "leftValue": "={{ $json.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "array",
+                "operation": "lengthGt",
+                "rightType": "number"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -5504,
+        -432
+      ],
+      "id": "3da1503a-eebc-4ba4-be75-b8a54894926e",
+      "name": "Node IF Blacklist1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "76cccb6b-ef79-44aa-9168-06e04582dacd",
+              "leftValue": "=$json.existsWhatsapp",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -4864,
+        -272
+      ],
+      "id": "9d3e9683-536c-4b88-8a48-10dd183673ab",
+      "name": "🤔 Has WhatsApp ?1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.twilio.com/2010-04-01/Accounts/ACCOUNT_SID/Messages.json",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"To\": \"{{ $json.clean_phone }}\",\n  \"Body\": \"Confirmez votre commande : 1 Oui / 2 Non\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -6816,
+        1152
+      ],
+      "id": "81b370e3-2c40-49bb-a0c8-fb33af82eb1a",
+      "name": "📩 Send SMS1"
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -6480,
+        48
+      ],
+      "id": "750826ae-9c5b-4cd9-a5a7-1e8bd73d2bcd",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GREEN_API_URL }}/waInstance{{ $env.GREEN_API_INSTANCE }}/sendMessage/{{ $env.GREEN_API_TOKEN }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chatId\": \"{{ $json.chatId }}\",\n  \"message\": \"👀 {{ $json.prenom }}, votre commande est en attente !\\n\\nConfirmez maintenant 👉 Répondez *OUI* ou *NON*\\n\\nID: {{ $json.order_id }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -6032,
+        928
+      ],
+      "id": "6784b9d9-3997-4b9d-89c5-1a60e2cd633e",
+      "name": "🔁 Relance "
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -6000,
+        112
+      ],
+      "id": "1aeec9cd-4ce1-42f2-bef9-53bf56054480",
+      "name": "⏱ Wait 30min1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GREEN_API_URL }}/waInstance{{ $env.GREEN_API_INSTANCE }}/sendMessage/{{ $env.GREEN_API_TOKEN }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chatId\": \"{{ $json.chatId }}\",\n  \"message\": \"🔥 {{ $json.prenom }}, stock limité sur {{ $json.produit }} !\\nNe ratez pas votre chance 👉 {{ $json.lien }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -4112,
+        240
+      ],
+      "id": "237201c8-975b-4685-aafb-d9be53db8907",
+      "name": "RELANCE "
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GREEN_API_URL }}/waInstance{{ $env.GREEN_API_INSTANCE }}/sendMessage/{{ $env.GREEN_API_TOKEN }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chatId\": \"{{ $json.chatId }}\",\n  \"message\": \"🎁 Dernière chance {{ $json.prenom }} !\\nProfitez de -10% avec code {{ $env.PROMO_CODE }}\\n👉 {{ $json.lien }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -2288,
+        368
+      ],
+      "id": "fac30913-e9a4-437f-a476-2fd6d9489480",
+      "name": "RELANCE 3 (FINAL)1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GREEN_API_URL }}/waInstance{{ $env.GREEN_API_INSTANCE }}/checkWhatsapp/{{ $env.GREEN_API_TOKEN }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"phoneNumber\": \"{{ $json.phone }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -5104,
+        -448
+      ],
+      "id": "f23b4b41-be21-4dc4-86d1-d9e7311efe1e",
+      "name": "Check WhatsApp",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GREEN_API_URL }}/waInstance{{ $env.GREEN_API_INSTANCE }}/sendMessage/{{ $env.GREEN_API_TOKEN }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chatId\": \"{{ $json.chatId }}\",\n  \"message\": \"✅ Confirmation commande\\n\\n👋 Bonjour {{ $json.prenom }}\\n📦 {{ $json.produit }}\\n💰 {{ $json.total_price }} DH\\n\\nID: {{ $json.order_id }}\\n\\nConfirmez :\\n1️⃣ Oui\\n2️⃣ Non\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -7040,
+        864
+      ],
+      "id": "3204406d-a6b8-4623-8680-a795ed84741e",
+      "name": "💬 Send WhatsApp1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [{\n    \"parts\": [{\n      \"text\": \"Analyse ce message client (darija ou français).\\nRéponds UNIQUEMENT par un de ces mots : CONFIRM, CANCEL, QUESTION\\n\\nMessage: {{ $('🧠 Extract Order ID').item.json.message }}\"\n    }]\n  }],\n  \"generationConfig\": {\n    \"temperature\": 0.1,\n    \"maxOutputTokens\": 50,\n    \"thinkingConfig\": {\n      \"thinkingBudget\": 0\n    }\n  }\n}",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-goog-api-key",
+              "value": "={{ $env.GEMINI_API_KEY }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -2432,
+        1280
+      ],
+      "id": "1899bb48-c91c-4a70-92b9-2f140d070592",
+      "name": "🤖 Analyse Réponse"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.output }}",
+                    "rightValue": "CONFIRM",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "9fc1a609-f265-4269-85e1-71c43d6149d0"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "a69c0f19-83a6-4b44-b0a6-8e2f5b70e9b4",
+                    "leftValue": "={{ $json.output }}",
+                    "rightValue": "CANCEL",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "afb0ae75-18b3-497d-acd9-18494efea4fd",
+                    "leftValue": "={{ $json.output }}",
+                    "rightValue": "QUESTION",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -1952,
+        1296
+      ],
+      "id": "1aaa20f4-c1b8-40e5-961d-b720666016ca",
+      "name": "🔀 Type Réponse"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Pending Orders",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "order_id ": "={{ $json.order_id }}",
+            "phone": "={{ $json.clean_phone }}",
+            "prenom ": "={{ $json.prenom }}",
+            "produit ": "={{ $json.produit }}",
+            "total": "={{ $json.total_price }}",
+            "score": "={{ $json.score }}",
+            "status": "pending",
+            "timestamp": "={{ new Date().toISOString() }}",
+            "lien": "={{ $json.lien }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "order_id ",
+              "displayName": "order_id ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "prenom ",
+              "displayName": "prenom ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "produit ",
+              "displayName": "produit ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "total",
+              "displayName": "total",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "score",
+              "displayName": "score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "lien",
+              "displayName": "lien",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "adresse",
+              "displayName": "adresse",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "ville",
+              "displayName": "ville",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "latitude",
+              "displayName": "latitude",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "longitude",
+              "displayName": "longitude",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "maps_link",
+              "displayName": "maps_link",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -5808,
+        -400
+      ],
+      "id": "dcca0e56-ef7a-4c8f-9f69-9f663aa28123",
+      "name": "Save Pending Orders"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-reply",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -4256,
+        1232
+      ],
+      "id": "1789489d-6966-4ff0-bae7-a38e2eadc5d6",
+      "name": "Webhook Réponse"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $json.body || $json;\nconst body = raw.body || raw;\n\nconst text = body.message || \"\";\nconst phone = body.phone || \"\";\nconst match = text.match(/ID[\\:\\s]+([a-zA-Z0-9]+)/);\n\nif (!match) {\n  return [];\n}\n\nreturn [{\n  json: {\n    order_id: match[1],\n    phone: phone,\n    message: text\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3664,
+        1216
+      ],
+      "id": "933db468-38bc-4087-9d44-a0cfa786f7df",
+      "name": "🧠 Extract Order ID"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Pending Orders",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "order_id ",
+              "lookupValue": "={{ $json.order_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -3232,
+        1264
+      ],
+      "id": "d1234439-dea1-4bfc-b337-6b7f474a1ab6",
+      "name": "Get Order from Sheet"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Pending Orders",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "row_number": 0,
+            "order_id ": "={{ $json.order_id  }}",
+            "status": "confirmed"
+          },
+          "matchingColumns": [
+            "order_id "
+          ],
+          "schema": [
+            {
+              "id": "order_id ",
+              "displayName": "order_id ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "prenom ",
+              "displayName": "prenom ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "produit ",
+              "displayName": "produit ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "total",
+              "displayName": "total",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "score",
+              "displayName": "score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "lien",
+              "displayName": "lien",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "adresse",
+              "displayName": "adresse",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "ville",
+              "displayName": "ville",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "latitude",
+              "displayName": "latitude",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "longitude",
+              "displayName": "longitude",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "maps_link",
+              "displayName": "maps_link",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -1520,
+        1056
+      ],
+      "id": "f864c206-cb08-4836-9ce4-02eced1a47c7",
+      "name": "✅ Confirm Order in Sheet"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GREEN_API_URL }}/waInstance{{ $env.GREEN_API_INSTANCE }}/sendMessage/{{ $env.GREEN_API_TOKEN }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chatId\": \"{{ $('🧠 Extract Order ID').item.json.phone }}@c.us\",\n  \"message\": \"✅ Merci !\\n\\nVotre commande est confirmée 🎉\\nNous préparons votre colis. Livraison sous 48h 🚚\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1200,
+        1056
+      ],
+      "id": "0d3e46a9-2ef3-4e4b-a111-0942ead37ca6",
+      "name": "🎉 Envoyer Confirmation Client"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GREEN_API_URL }}/waInstance{{ $env.GREEN_API_INSTANCE }}/sendMessage/{{ $env.GREEN_API_TOKEN }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chatId\": \"{{ $env.ADMIN_PHONE }}@c.us\",\n  \"message\": \"🟢 COMMANDE CONFIRMÉE\\n━━━━━━━━━━━━\\n🆔 {{ $('🧠 Extract Order ID').item.json.order_id }}\\n📱 {{ $('🧠 Extract Order ID').item.json.phone }}\\nStatut : confirmed\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -704,
+        1008
+      ],
+      "id": "cf19474c-5f48-481b-97f2-2f5a7f2f23d3",
+      "name": "📢 Notifier Admin (Confirmé)"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Pending Orders",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "row_number": 0,
+            "order_id ": "={{ $json.order_id }}",
+            "status": "=cancelled"
+          },
+          "matchingColumns": [
+            "order_id "
+          ],
+          "schema": [
+            {
+              "id": "order_id ",
+              "displayName": "order_id ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "prenom ",
+              "displayName": "prenom ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "produit ",
+              "displayName": "produit ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "total",
+              "displayName": "total",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "score",
+              "displayName": "score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "lien",
+              "displayName": "lien",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "adresse",
+              "displayName": "adresse",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "ville",
+              "displayName": "ville",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "latitude",
+              "displayName": "latitude",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "longitude",
+              "displayName": "longitude",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "maps_link",
+              "displayName": "maps_link",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -1312,
+        1280
+      ],
+      "id": "8f3e88ac-2b7b-403c-82a5-cd377da15163",
+      "name": "❌ Cancel Order in Sheet"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GREEN_API_URL }}/waInstance{{ $env.GREEN_API_INSTANCE }}/sendMessage/{{ $env.GREEN_API_TOKEN }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chatId\": \"{{ $('🧠 Extract Order ID').item.json.phone }}@c.us\",\n  \"message\": \"😔 Votre commande a bien été annulée.\\n\\nSi vous changez d'avis, nous sommes toujours là ! 🙏\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -768,
+        1280
+      ],
+      "id": "f42b6969-60ab-4263-836e-ac36d292dffb",
+      "name": "😔 Envoyer Message Annulation"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-goog-api-key",
+              "value": "={{ $env.GEMINI_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [{\n    \"parts\": [{\n      \"text\": \"Tu es un agent SAV pour une boutique e-commerce. Réponds en darija ou français selon la langue du client. Sois bref et utile.\\n\\nQuestion du client : {{ $json.message }}\\n\\nRéponds directement.\"\n    }]\n  }],\n  \"generationConfig\": {\n    \"temperature\": 0.7,\n    \"maxOutputTokens\": 300,\n    \"thinkingConfig\": {\n      \"thinkingBudget\": 0\n    }\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1456,
+        1568
+      ],
+      "id": "7b4cfa14-646a-41f2-9914-4acd89f87037",
+      "name": "🤖 Gemini Réponse Question"
+    },
+    {
+      "parameters": {
+        "jsCode": "const origin = $('🧠 Extract Order ID').item.json;\nconst sheetData = $('Get Order from Sheet').item.json;\nconst text = $json.candidates?.[0]?.content?.parts?.[0]?.text || \"Désolé, je n'ai pas pu traiter votre demande.\";\n\nreturn [{\n  json: {\n    order_id: origin.order_id,\n    phone: origin.phone,\n    message: origin.message,\n    prenom: sheetData[\"prenom \"] || sheetData.prenom || \"client\",\n    produit: sheetData[\"produit \"] || sheetData.produit || \"\",\n    gemini_reply: text.trim().replace(/\\n/g, ' '),\n    chatId: origin.phone + \"@c.us\"\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1232,
+        1632
+      ],
+      "id": "2df7e8e0-952b-4a3e-831d-a7cc5ea6d6a6",
+      "name": "📝 Parse Gemini Answer"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GREEN_API_URL }}/waInstance{{ $env.GREEN_API_INSTANCE }}/sendMessage/{{ $env.GREEN_API_TOKEN }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chatId\": \"{{ $json.chatId }}\",\n  \"message\": \"{{ $json.gemini_reply }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -656,
+        1552
+      ],
+      "id": "174e4eb1-8662-4b52-ba54-0aa89b1bd411",
+      "name": "💬 Envoyer Réponse Question"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $json.candidates?.[0]?.content?.parts?.[0]?.text || '';\nconst text = raw.trim().toUpperCase();\n\nlet output = 'QUESTION';\nif (text.includes('CONFIRM')) output = 'CONFIRM';\nelse if (text.includes('CANCEL')) output = 'CANCEL';\n\nconst origin = $('🧠 Extract Order ID').item.json;\n\nreturn [{\n  json: {\n    ...origin,\n    output\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2160,
+        1328
+      ],
+      "id": "3a6fcf62-047d-4fed-b9a2-2a3cd4a87859",
+      "name": "🧹 Parse Analyse"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GREEN_API_URL }}/waInstance{{ $env.GREEN_API_INSTANCE }}/sendMessage/{{ $env.GREEN_API_TOKEN }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chatId\": \"{{ $('🧠 Extract Order ID').item.json.phone }}@c.us\",\n  \"message\": \"📍 Pour livrer votre commande rapidement, partagez votre localisation :\\n\\n👉 WhatsApp → Pièce jointe → Localisation → Envoyer votre position actuelle\\n\\nOu tapez votre adresse complète 🏠\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -928,
+        1008
+      ],
+      "id": "75a002c2-685b-4aed-a93a-d7d5619362b2",
+      "name": "📍 Demander Localisation"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-location",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -3312,
+        1904
+      ],
+      "id": "e33dfc30-ae88-4155-b38f-f31383d967b8",
+      "name": "🌍 Webhook Localisation"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $json.body || $json;\nconst body = raw.body || raw;\n\nconst lat   = body.location?.latitude  || body.lat  || null;\nconst lng   = body.location?.longitude || body.lng  || null;\nconst addr  = body.location?.address   || body.message || '';\nconst phone = (body.phone || '').replace(/\\D/g, '');\n\nreturn [{\n  json: {\n    phone,\n    latitude: lat,\n    longitude: lng,\n    address_raw: addr,\n    has_gps: lat !== null && lng !== null,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2896,
+        1920
+      ],
+      "id": "85209517-76e4-40fd-ac14-8c72a5a7673c",
+      "name": "📐 Extract GPS Data"
+    },
+    {
+      "parameters": {
+        "url": "=https://nominatim.openstreetmap.org/reverse?format=json&lat={{ $json.latitude }}&lon={{ $json.longitude }}&accept-language=fr",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-workflow"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -2528,
+        1936
+      ],
+      "id": "4d2d72f0-4118-425d-ba3a-cdcd4ec641c0",
+      "name": "🗺️ Reverse Geocoding"
+    },
+    {
+      "parameters": {
+        "jsCode": "const origin = $('📐 Extract GPS Data').item.json;\nconst geo = $json;\n\nconst adresse = geo.display_name \n  || geo.address?.road \n  || origin.address_raw \n  || 'Adresse non disponible';\n\nconst quartier = geo.address?.suburb \n  || geo.address?.neighbourhood \n  || geo.address?.quarter \n  || '';\n\nconst ville = geo.address?.city \n  || geo.address?.town \n  || geo.address?.village \n  || '';\n\nreturn [{\n  json: {\n    ...origin,\n    adresse_complete: adresse,\n    quartier,\n    ville,\n    maps_link: origin.latitude \n      ? `https://maps.google.com/?q=${origin.latitude},${origin.longitude}`\n      : ''\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2320,
+        1936
+      ],
+      "id": "fd75560c-673b-4f5f-9197-948401c0efa3",
+      "name": "📝 Format Adresse"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Pending Orders",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "phone": "={{ $json.phone }}",
+            "adresse": "={{ $json.adresse_complete }}",
+            "ville": "={{ $json.ville }}",
+            "latitude": "={{ $json.latitude }}",
+            "longitude": "={{ $json.longitude }}",
+            "maps_link": "={{ $json.maps_link }}",
+            "quartier": "={{ $json.quartier }}"
+          },
+          "matchingColumns": [
+            "phone"
+          ],
+          "schema": [
+            {
+              "id": "order_id ",
+              "displayName": "order_id ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "prenom ",
+              "displayName": "prenom ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "produit ",
+              "displayName": "produit ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "total",
+              "displayName": "total",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "score",
+              "displayName": "score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "lien",
+              "displayName": "lien",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "adresse",
+              "displayName": "adresse",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ville",
+              "displayName": "ville",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "latitude",
+              "displayName": "latitude",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "longitude",
+              "displayName": "longitude",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "maps_link",
+              "displayName": "maps_link",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "quartier",
+              "displayName": "quartier",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -2112,
+        1936
+      ],
+      "id": "f80481fd-7568-49e1-9194-da0fccafac21",
+      "name": "💾 Save GPS to Sheet"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GREEN_API_URL }}/waInstance{{ $env.GREEN_API_INSTANCE }}/sendMessage/{{ $env.GREEN_API_TOKEN }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chatId\": \"{{ $env.ADMIN_PHONE }}@c.us\",\n  \"message\": \"📍 LOCALISATION REÇUE\\n━━━━━━━━━━━━\\n📱 {{ $json.phone }}\\n\\n🗺️ Adresse : {{ $json.adresse }}\\n🏘️ Quartier : {{ $json.quartier }}\\n🏙️ Ville : {{ $json.ville }}\\n\\n👉 Google Maps : {{ $json.maps_link }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1904,
+        1936
+      ],
+      "id": "4925f0c2-e688-44cc-9738-abe85c5bd555",
+      "name": "📢 Notifier Admin avec GPS"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Pending Orders",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "order_id ",
+              "lookupValue": "={{ $json.order_id }}"
+            }
+          ]
+        },
+        "options": {
+          "returnFirstMatch": true
+        }
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -5744,
+        96
+      ],
+      "id": "08bd2b26-cebe-49da-a94d-0aa613d53fd5",
+      "name": "🔎 Check Statut 1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "d7725084-3647-41d8-941a-e9d910bd8c8d",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "=pending",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {
+          "ignoreCase": false
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -5520,
+        144
+      ],
+      "id": "af4efdda-d0fb-49e6-932c-f314201bb36e",
+      "name": "❓ Encore Pending? 2"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.score }}",
+                    "rightValue": "VIP",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "381edb59-3015-4fa7-ab84-18958cad87e1"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "81323822-8c22-4b09-a903-d0c08ed0a8ca",
+                    "leftValue": "={{ $json.score }}",
+                    "rightValue": "RISQUE",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "0eac1c19-209a-40f7-bb97-9b0a4dff230c",
+                    "leftValue": "={{ $json.score }}",
+                    "rightValue": "PLATINUM",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "5442e7b6-e2c1-4bce-b011-053e53794e56",
+                    "leftValue": "={{ $json.score }}",
+                    "rightValue": "PREMIUM",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "allMatchingOutputs": false
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -7744,
+        688
+      ],
+      "id": "ef79c01b-59cc-4d49-ac01-0b0909eaef5d",
+      "name": "🎯 Switch Score VIP"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GREEN_API_URL }}/waInstance{{ $env.GREEN_API_INSTANCE }}/sendMessage/{{ $env.GREEN_API_TOKEN }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chatId\": \"{{ $json.chatId }}\",\n  \"message\": \"👑 Bonjour {{ $json.prenom }}, client privilégié !\\n\\n📦 {{ $json.produit }}\\n💰 {{ $json.total_price }} DH\\n\\nEn tant que client VIP, vous bénéficiez d'une livraison prioritaire 🚀\\n\\nID: {{ $json.order_id }}\\n\\nConfirmez :\\n1️⃣ Oui, je confirme\\n2️⃣ Non, annuler\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -7504,
+        160
+      ],
+      "id": "8cfb2c9f-2ac9-4d68-a4d8-8b37bec6e089",
+      "name": "👑 Send WhatsApp VIP"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GREEN_API_URL }}/waInstance{{ $env.GREEN_API_INSTANCE }}/sendMessage/{{ $env.GREEN_API_TOKEN }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chatId\": \"{{ $env.ADMIN_PHONE }}@c.us\",\n  \"message\": \"⚠️ COMMANDE RISQUE\\n━━━━━━━━━━━━\\n👤 {{ $json.prenom }}\\n📱 {{ $json.clean_phone }}\\n📦 {{ $json.produit }}\\n💰 {{ $json.total_price }} DH\\n\\n❗ Panier < 100 DH — vérification manuelle conseillée\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -7440,
+        192
+      ],
+      "id": "0580c219-925f-4da3-8ea0-fc24707d9149",
+      "name": "⚠️ Alerte Admin Risque"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Pending Orders",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "order_id ",
+              "lookupValue": "={{ $json.order_id }}"
+            }
+          ]
+        },
+        "options": {
+          "returnFirstMatch": true
+        }
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -6688,
+        -368
+      ],
+      "id": "68a91379-f0ec-43ae-b072-411f30b632bc",
+      "name": "🔍 Check Doublon",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "6edb4f9f-c5e3-44ad-a156-9b19995b67ee",
+              "leftValue": "=={{ Object.keys($json).length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -6432,
+        -400
+      ],
+      "id": "a86ad693-0709-4f8d-8dab-8ec7288f125c",
+      "name": "❓ Déjà Enregistré?"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Relances Log",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "phone ": "={{ $json.clean_phone }}",
+            "prenom": "={{ $json.prenom }}",
+            " produit": "={{ $json.produit }}",
+            "relance_num": "=1",
+            "order_id": "={{ $json.order_id }}",
+            "type": "abandon",
+            "timestamp": "=={{ new Date().toISOString() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "phone ",
+              "displayName": "phone ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "prenom",
+              "displayName": "prenom",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": " produit",
+              "displayName": " produit",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "order_id",
+              "displayName": "order_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "relance_num",
+              "displayName": "relance_num",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "type",
+              "displayName": "type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -4480,
+        -752
+      ],
+      "id": "e26135e1-2757-456a-a5fa-64fdeabd8bda",
+      "name": "📝 Log Relance"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Relances Log",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "phone ": "={{ $json.clean_phone }}",
+            "prenom": "={{ $json.prenom }}",
+            " produit": "={{ $json.produit }}",
+            "order_id": "={{ $json.order_id }}",
+            "relance_num": "2",
+            "type": "abandon",
+            "timestamp": "=={{ new Date().toISOString() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "phone ",
+              "displayName": "phone ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "prenom",
+              "displayName": "prenom",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": " produit",
+              "displayName": " produit",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "order_id",
+              "displayName": "order_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "relance_num",
+              "displayName": "relance_num",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "type",
+              "displayName": "type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -2864,
+        -672
+      ],
+      "id": "336469a3-d233-43db-a84d-6f503c067515",
+      "name": "📝 Log Relance1"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Relances Log",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "phone ": "={{ $json.clean_phone }}",
+            "prenom": "={{ $json.prenom }}",
+            " produit": "={{ $json.produit }}",
+            "order_id": "={{ $json.order_id }}",
+            "relance_num": "3",
+            "type": "abandon",
+            "timestamp": "=={{ new Date().toISOString() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "phone ",
+              "displayName": "phone ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "prenom",
+              "displayName": "prenom",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": " produit",
+              "displayName": " produit",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "order_id",
+              "displayName": "order_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "relance_num",
+              "displayName": "relance_num",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "type",
+              "displayName": "type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -976,
+        -816
+      ],
+      "id": "30d6ac63-51be-4061-a981-33b71bbaed3a",
+      "name": "📝 Log Relance2"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Relances Log",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "phone ": "={{ $json.clean_phone }}",
+            "prenom": "={{ $json.prenom }}",
+            " produit": "={{ $json.produit }}",
+            "order_id": "={{ $json.order_id }}",
+            "type": "commande",
+            "timestamp": "={{ $now.toISO() }}",
+            "relance_num": "1"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "phone ",
+              "displayName": "phone ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "prenom",
+              "displayName": "prenom",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": " produit",
+              "displayName": " produit",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "order_id",
+              "displayName": "order_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "relance_num",
+              "displayName": "relance_num",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "type",
+              "displayName": "type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -5616,
+        944
+      ],
+      "id": "998fae50-32b5-46f6-b562-e92e3f7af09f",
+      "name": "📝 Log Relance3",
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Relances Log",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "phone ": "={{ $json.clean_phone }}",
+            "prenom": "={{ $json.prenom }}",
+            " produit": "={{ $json.produit }}",
+            "order_id": "={{ $json.order_id }}",
+            "type": "commande",
+            "relance_num": "2",
+            "timestamp": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "phone ",
+              "displayName": "phone ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "prenom",
+              "displayName": "prenom",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": " produit",
+              "displayName": " produit",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "order_id",
+              "displayName": "order_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "relance_num",
+              "displayName": "relance_num",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "type",
+              "displayName": "type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -3792,
+        384
+      ],
+      "id": "7c34f646-4711-4cc9-b3ef-b177495d49fb",
+      "name": "📝 Log Relance4"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Relances Log",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "phone ": "={{ $json.clean_phone }}",
+            "prenom": "={{ $json.prenom }}",
+            " produit": "={{ $json.produit }}",
+            "order_id": "={{ $json.order_id }}",
+            "timestamp": "={{ $now.toISO() }}",
+            "type": "commande",
+            "relance_num": "3"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "phone ",
+              "displayName": "phone ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "prenom",
+              "displayName": "prenom",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": " produit",
+              "displayName": " produit",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "order_id",
+              "displayName": "order_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "relance_num",
+              "displayName": "relance_num",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "type",
+              "displayName": "type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -2000,
+        320
+      ],
+      "id": "86565f9d-b96e-4ccb-84f8-2ea46db51dd4",
+      "name": "📝 Log Relance5"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Pending Orders",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "order_id ",
+              "lookupValue": "={{ $json.order_id }}"
+            }
+          ]
+        },
+        "options": {
+          "returnFirstMatch": true
+        }
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -4704,
+        880
+      ],
+      "id": "c90789b8-4ed9-40b7-9cc4-0f26fe731dff",
+      "name": "🔎 Check Statut 4",
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "d7725084-3647-41d8-941a-e9d910bd8c8d",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "pending",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {
+          "ignoreCase": false
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -4896,
+        224
+      ],
+      "id": "0e3e982e-41af-4c72-b7f7-c4860dbda36b",
+      "name": "❓ Encore Pending? 5"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Pending Orders",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "order_id ",
+              "lookupValue": "={{ $json.order_id }}"
+            }
+          ]
+        },
+        "options": {
+          "returnFirstMatch": true
+        }
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -3408,
+        416
+      ],
+      "id": "6bd8efbf-1810-4b99-b363-ddb3c9b55bed",
+      "name": "🔎 Check Statut 5"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "d7725084-3647-41d8-941a-e9d910bd8c8d",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "pending",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {
+          "ignoreCase": false
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -3104,
+        528
+      ],
+      "id": "8465ef6a-8d8e-4fe1-956f-898df0920a69",
+      "name": "❓ Encore Pending? 6"
+    },
+    {
+      "parameters": {
+        "jsCode": "const now = new Date();\nconst heure = (now.getUTCHours() + 0) % 24;\n\nif (heure >= 8 && heure < 21) {\n  return [{ json: { ...$json, peut_envoyer: true } }];\n}\n\nreturn [{ json: { ...$json, peut_envoyer: false } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -944,
+        -1248
+      ],
+      "id": "43cb769d-4f2e-47da-8720-9fe2d466e150",
+      "name": "⏰ Check Heure Envoi"
+    },
+    {
+      "parameters": {
+        "jsCode": "const now = new Date();\n// Heure Maroc (UTC+1)\nconst heure = (now.getUTCHours() + 1) % 24;\n\n// Bloquer entre 22h et 9h\nif (heure < 9 || heure >= 22) {\n  // Calculer délai jusqu'à 9h\n  const minutesRestantes = heure < 9 \n    ? (9 - heure) * 60 \n    : (24 - heure + 9) * 60;\n  \n  return [{\n    json: {\n      ...$json,\n      peut_envoyer: false,\n      attente_minutes: minutesRestantes\n    }\n  }];\n}\n\nreturn [{ json: { ...$json, peut_envoyer: true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3680,
+        -720
+      ],
+      "id": "41b982d5-af17-4ef6-b0d9-80bfa1dd8687",
+      "name": "⏰ Check Heure Envoi1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const now = new Date();\n// Heure Maroc (UTC+1)\nconst heure = (now.getUTCHours() + 1) % 24;\n\n// Bloquer entre 22h et 9h\nif (heure < 9 || heure >= 22) {\n  // Calculer délai jusqu'à 9h\n  const minutesRestantes = heure < 9 \n    ? (9 - heure) * 60 \n    : (24 - heure + 9) * 60;\n  \n  return [{\n    json: {\n      ...$json,\n      peut_envoyer: false,\n      attente_minutes: minutesRestantes\n    }\n  }];\n}\n\nreturn [{ json: { ...$json, peut_envoyer: true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2304,
+        -720
+      ],
+      "id": "e84d6cf7-01d3-45a2-8a8d-2b1bc39ba4b7",
+      "name": "⏰ Check Heure Envoi2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const order = $json;\nconst historique = `\nClient: ${order[\"prenom \"] || order.prenom || \"\"}\nProduit commandé: ${order[\"produit \"] || order.produit || \"\"}\nMontant: ${order.total || order.total_price || \"\"} DH\nStatut commande: ${order.status}\nScore: ${order.score}\n`;\n\nreturn [{\n  json: {\n    ...order,\n    contexte_client: historique\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2800,
+        1328
+      ],
+      "id": "6c37cd44-63fb-4764-a1fc-f63d8940208c",
+      "name": "📚 Build Conversation Context"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GREEN_API_URL }}/waInstance{{ $env.GREEN_API_INSTANCE }}/sendMessage/{{ $env.GREEN_API_TOKEN }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chatId\": \"{{ $json.chatId }}\",\n  \"message\": \"💎 Bonjour {{ $json.prenom }}, client PLATINUM !\\n\\n📦 {{ $json.produit }}\\n💰 {{ $json.total_price }} DH\\n\\nLivraison express 24h + cadeau offert 🎁\\n\\nID: {{ $json.order_id }}\\n\\n1️⃣ Confirmer\\n2️⃣ Annuler\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -7168,
+        480
+      ],
+      "id": "83a779d2-b6e7-4b57-8d65-2052d6037930",
+      "name": "👑 Send WhatsApp PLATINUM",
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GREEN_API_URL }}/waInstance{{ $env.GREEN_API_INSTANCE }}/sendMessage/{{ $env.GREEN_API_TOKEN }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chatId\": \"{{ $json.chatId }}\",\n  \"message\": \"⭐ Bonjour {{ $json.prenom }} !\\n\\n📦 {{ $json.produit }}\\n💰 {{ $json.total_price }} DH\\n\\nLivraison prioritaire incluse 🚀\\n\\nID: {{ $json.order_id }}\\n\\n1️⃣ Confirmer\\n2️⃣ Annuler\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -7136,
+        192
+      ],
+      "id": "18aa856c-0fab-44b5-9d97-17df95438427",
+      "name": "👑 Send WhatsApp  PREMIUM",
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "2335bb87-4d09-4182-947d-e8a0adc63436",
+              "leftValue": "=={{ $json.peut_envoyer }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -5168,
+        -768
+      ],
+      "id": "ff3c6863-0efa-46fa-97c6-b04972aef5a1",
+      "name": "Peut envoyer ?"
+    },
+    {
+      "parameters": {
+        "resume": "specificTime",
+        "dateTime": "=={{ $now.plus(660, 'minutes').toISO() }}"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -4832,
+        -672
+      ],
+      "id": "8039b984-9124-4864-9846-0d19f7730669",
+      "name": "Wait"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "2335bb87-4d09-4182-947d-e8a0adc63436",
+              "leftValue": "=={{ $json.peut_envoyer }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -3456,
+        -1312
+      ],
+      "id": "38a4ae3f-a794-4ea9-8046-e2b367cdcfb1",
+      "name": "Peut envoyer ?1"
+    },
+    {
+      "parameters": {
+        "amount": "=={{ $json.attente_minutes }} ",
+        "unit": "minutes"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -3040,
+        -1296
+      ],
+      "id": "6cccc089-5b2d-42dd-a75b-8776da94dff9",
+      "name": "Wait1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "2335bb87-4d09-4182-947d-e8a0adc63436",
+              "leftValue": "=={{ $json.peut_envoyer }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1920,
+        -736
+      ],
+      "id": "36d1b2d1-8a59-48b0-9b56-ea8aec24f1f7",
+      "name": "Peut envoyer ?2"
+    },
+    {
+      "parameters": {
+        "amount": "=={{ $json.attente_minutes }} ",
+        "unit": "minutes"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -1824,
+        -480
+      ],
+      "id": "4ea1daab-bf73-46e5-904c-5b2cb6a8720f",
+      "name": "Wait2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const checkWA = $json; // contient chatId\nconst clientData = $('📱 Clean + Score Abandon').item.json;\n\nreturn [{\n  json: {\n    ...clientData,\n    chatId: checkWA.chatId\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2112,
+        -1616
+      ],
+      "id": "fdd1a6d8-c8d7-4855-981c-c41bc3c23ab9",
+      "name": "🔗 Merge Phone Data"
+    },
+    {
+      "parameters": {
+        "jsCode": "const clientData = $('📱 Clean + Score Abandon').item.json;\nconst chatId = $('🔗 Merge Phone Data').item.json.chatId;\n\nreturn [{\n  json: {\n    ...clientData,\n    chatId: chatId\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1552,
+        -1664
+      ],
+      "id": "dff8cc3e-7dc4-4352-baa4-2455cac5c003",
+      "name": "♻️ Restore Data Abandon"
+    },
+    {
+      "parameters": {
+        "jsCode": "const client = $('♻️ Restore Data Abandon').item.json;\n\nreturn [{\n  json: {\n    ...client\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4176,
+        -752
+      ],
+      "id": "c8af11fe-2f44-42f3-896b-060c7bd97d00",
+      "name": "♻️ Restore After Log"
+    },
+    {
+      "parameters": {
+        "jsCode": "const client = $('♻️ Restore Data Abandon').item.json;\nreturn [{ json: { ...client } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2656,
+        -672
+      ],
+      "id": "a5922c33-628c-4460-a4d7-e0421fc7ef99",
+      "name": "♻️ Restore After Log1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const client = $('💾 Save Client Temp').item.json;\nreturn [{ json: { ...client } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -6144,
+        -432
+      ],
+      "id": "88dfb4bc-3413-4e97-a32e-ee89d4a9e82c",
+      "name": "♻️ Restore Before Save"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Sauvegarde les données dans le json qui sera transmis\nreturn [{ json: { ...$json } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -6896,
+        -384
+      ],
+      "id": "9c4e1f3a-30e4-48cd-b80d-82fd139fdaf6",
+      "name": "💾 Save Client Temp"
+    },
+    {
+      "parameters": {
+        "jsCode": "const checkWA = $json;\nconst clientData = $('💾 Save Client Temp').item.json;\n\nreturn [{\n  json: {\n    ...clientData,\n    chatId: checkWA.chatId,\n    clean_phone: clientData.phone\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -7856,
+        -48
+      ],
+      "id": "16a62a76-00e3-497a-a221-ddf0bb37dc81",
+      "name": "🔗 Merge Phone Data1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const client = $('💾 Save Client Temp').item.json;\nconst chatId = $('🔗 Merge Phone Data1').item.json.chatId;\n\nreturn [{\n  json: {\n    ...client,\n    chatId: chatId,\n    clean_phone: client.phone,\n    order_id: (client.order_id || client[\"order_id \"] || \"\").trim()\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -6240,
+        96
+      ],
+      "id": "7270d703-82b8-4a83-8bc3-4d72cba67a08",
+      "name": "♻️ Restore Commande"
+    },
+    {
+      "parameters": {
+        "jsCode": "const client = $('♻️ Restore Commande').item.json;\n\nreturn [{\n  json: {\n    clean_phone: client.clean_phone || client.phone || \"\",\n    prenom: client.prenom,\n    produit: client.produit,\n    order_id: client.order_id,\n    chatId: client.chatId,\n    lien: client.lien,\n    total_price: client.total_price,\n    score: client.score\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4464,
+        272
+      ],
+      "id": "da35ed7f-aa7e-4bea-913b-c41c7201c3cc",
+      "name": "♻️ Restore For Relance2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const client = $('♻️ Restore Commande').item.json;\n\nreturn [{\n  json: {\n    clean_phone: client.clean_phone || client.phone || \"\",\n    prenom: client.prenom,\n    produit: client.produit,\n    order_id: client.order_id,\n    chatId: client.chatId,\n    lien: client.lien,\n    total_price: client.total_price,\n    score: client.score\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3360,
+        64
+      ],
+      "id": "4eaa2fca-5c1f-4eb2-afa9-b444cb3f7d44",
+      "name": "♻️ Restore For Relance3"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -5104,
+        864
+      ],
+      "id": "7c01811a-ea53-4da7-9afe-734533f73fa3",
+      "name": "Wait6"
+    },
+    {
+      "parameters": {
+        "jsCode": "const client = $('♻️ Restore Commande').item.json;\n\nreturn [{\n  json: {\n    clean_phone: client.clean_phone || client.phone || \"\",\n    prenom: client.prenom,\n    produit: client.produit,\n    order_id: client.order_id,\n    chatId: client.chatId,\n    lien: client.lien,\n    total_price: client.total_price,\n    score: client.score\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2560,
+        256
+      ],
+      "id": "5b7671d3-1ff3-4df4-91b9-dcef1531633b",
+      "name": "♻️ Restore For Relance4"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -3152,
+        64
+      ],
+      "id": "4f6c0c88-5642-4c53-9b40-3e8c55aac390",
+      "name": "Wait24h1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const client = $('♻️ Restore Commande').item.json;\n\nreturn [{\n  json: {\n    clean_phone: client.clean_phone || client.phone || \"\",\n    prenom: client.prenom,\n    produit: client.produit,\n    order_id: client.order_id,\n    chatId: client.chatId,\n    lien: client.lien,\n    total_price: client.total_price,\n    score: client.score\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -6224,
+        912
+      ],
+      "id": "5fba5e2a-5887-4db3-9a04-b5aef75f0378",
+      "name": "Restore For Relance"
+    },
+    {
+      "parameters": {
+        "jsCode": "const client = $('♻️ Restore Commande').item.json;\n\nreturn [{\n  json: {\n    clean_phone: client.clean_phone || client.phone || \"\",\n    prenom: client.prenom,\n    produit: client.produit,\n    order_id: client.order_id,\n    chatId: client.chatId,\n    lien: client.lien,\n    total_price: client.total_price,\n    score: client.score\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -5408,
+        944
+      ],
+      "id": "eb5fb7be-16c7-489e-933c-c2a8242f1746",
+      "name": "♻️ Restore For Relance"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "🛒 Webhook Abandon": {
+      "main": [
+        [
+          {
+            "node": "📱 Clean + Score Abandon",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📱 Clean + Score Abandon": {
+      "main": [
+        [
+          {
+            "node": "❌ Téléphone Invalide?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "❌ Téléphone Invalide?": {
+      "main": [
+        [
+          {
+            "node": "🚫 Check Blacklist",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "🚫 Check Blacklist": {
+      "main": [
+        [
+          {
+            "node": "Node IF Blacklist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Node IF Blacklist": {
+      "main": [
+        [],
+        [
+          {
+            "node": "📲 Check WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📲 Check WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "🤔 Has WhatsApp ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🤔 Has WhatsApp ?": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge Phone Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📩 Send SMS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💬 Send WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "♻️ Restore Data Abandon",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📩 Send SMS": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "⏱ Wait 30min",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔁 Relance 1": {
+      "main": [
+        [
+          {
+            "node": "📝 Log Relance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⏱ Wait 30min": {
+      "main": [
+        [
+          {
+            "node": "⏰ Check Heure Envoi",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⏱ Wait 6h": {
+      "main": [
+        [
+          {
+            "node": "⏰ Check Heure Envoi1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RELANCE 2": {
+      "main": [
+        [
+          {
+            "node": "📝 Log Relance1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⏱ Wait 24h": {
+      "main": [
+        [
+          {
+            "node": "⏰ Check Heure Envoi2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📦 Webhook Commande": {
+      "main": [
+        [
+          {
+            "node": "🧠 Clean + Score Commande",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "❌ Téléphone Invalide?1": {
+      "main": [
+        [],
+        [
+          {
+            "node": "💾 Save Client Temp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Node IF Blacklist1": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Check WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🤔 Has WhatsApp ?1": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge Phone Data1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📩 Send SMS1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📩 Send SMS1": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "♻️ Restore Commande",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔁 Relance ": {
+      "main": [
+        [
+          {
+            "node": "📝 Log Relance3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⏱ Wait 30min1": {
+      "main": [
+        [
+          {
+            "node": "🔎 Check Statut 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RELANCE ": {
+      "main": [
+        [
+          {
+            "node": "📝 Log Relance4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧠 Clean + Score Commande": {
+      "main": [
+        [
+          {
+            "node": "❌ Téléphone Invalide?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "🤔 Has WhatsApp ?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💬 Send WhatsApp1": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🤖 Analyse Réponse": {
+      "main": [
+        [
+          {
+            "node": "🧹 Parse Analyse",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Pending Orders": {
+      "main": [
+        [
+          {
+            "node": "Node IF Blacklist1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Réponse": {
+      "main": [
+        [
+          {
+            "node": "🧠 Extract Order ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧠 Extract Order ID": {
+      "main": [
+        [
+          {
+            "node": "Get Order from Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Order from Sheet": {
+      "main": [
+        [
+          {
+            "node": "📚 Build Conversation Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔀 Type Réponse": {
+      "main": [
+        [
+          {
+            "node": "✅ Confirm Order in Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "❌ Cancel Order in Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "🤖 Gemini Réponse Question",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✅ Confirm Order in Sheet": {
+      "main": [
+        [
+          {
+            "node": "🎉 Envoyer Confirmation Client",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🎉 Envoyer Confirmation Client": {
+      "main": [
+        [
+          {
+            "node": "📍 Demander Localisation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📢 Notifier Admin (Confirmé)": {
+      "main": [
+        []
+      ]
+    },
+    "❌ Cancel Order in Sheet": {
+      "main": [
+        [
+          {
+            "node": "😔 Envoyer Message Annulation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🤖 Gemini Réponse Question": {
+      "main": [
+        [
+          {
+            "node": "📝 Parse Gemini Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📝 Parse Gemini Answer": {
+      "main": [
+        [
+          {
+            "node": "💬 Envoyer Réponse Question",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧹 Parse Analyse": {
+      "main": [
+        [
+          {
+            "node": "🔀 Type Réponse",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📍 Demander Localisation": {
+      "main": [
+        [
+          {
+            "node": "📢 Notifier Admin (Confirmé)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🌍 Webhook Localisation": {
+      "main": [
+        [
+          {
+            "node": "📐 Extract GPS Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📐 Extract GPS Data": {
+      "main": [
+        [
+          {
+            "node": "🗺️ Reverse Geocoding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🗺️ Reverse Geocoding": {
+      "main": [
+        [
+          {
+            "node": "📝 Format Adresse",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📝 Format Adresse": {
+      "main": [
+        [
+          {
+            "node": "💾 Save GPS to Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Save GPS to Sheet": {
+      "main": [
+        [
+          {
+            "node": "📢 Notifier Admin avec GPS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📢 Notifier Admin avec GPS": {
+      "main": [
+        []
+      ]
+    },
+    "🔎 Check Statut 1": {
+      "main": [
+        [
+          {
+            "node": "❓ Encore Pending? 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🎯 Switch Score VIP": {
+      "main": [
+        [
+          {
+            "node": "👑 Send WhatsApp VIP",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "⚠️ Alerte Admin Risque",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "👑 Send WhatsApp PLATINUM",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "👑 Send WhatsApp  PREMIUM",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "💬 Send WhatsApp1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "👑 Send WhatsApp VIP": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚠️ Alerte Admin Risque": {
+      "main": [
+        [
+          {
+            "node": "💬 Send WhatsApp1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 Check Doublon": {
+      "main": [
+        [
+          {
+            "node": "❓ Déjà Enregistré?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "❓ Déjà Enregistré?": {
+      "main": [
+        [
+          {
+            "node": "♻️ Restore Before Save",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "📝 Log Relance": {
+      "main": [
+        [
+          {
+            "node": "♻️ Restore After Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📝 Log Relance1": {
+      "main": [
+        [
+          {
+            "node": "♻️ Restore After Log1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RELANCE 3 (FINAL)": {
+      "main": [
+        [
+          {
+            "node": "📝 Log Relance2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📝 Log Relance3": {
+      "main": [
+        [
+          {
+            "node": "♻️ Restore For Relance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📝 Log Relance4": {
+      "main": [
+        [
+          {
+            "node": "♻️ Restore For Relance3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RELANCE 3 (FINAL)1": {
+      "main": [
+        [
+          {
+            "node": "📝 Log Relance5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "❓ Encore Pending? 2": {
+      "main": [
+        [
+          {
+            "node": "Restore For Relance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔎 Check Statut 4": {
+      "main": [
+        [
+          {
+            "node": "❓ Encore Pending? 5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "❓ Encore Pending? 5": {
+      "main": [
+        [
+          {
+            "node": "♻️ Restore For Relance2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔎 Check Statut 5": {
+      "main": [
+        [
+          {
+            "node": "❓ Encore Pending? 6",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "❓ Encore Pending? 6": {
+      "main": [
+        [
+          {
+            "node": "♻️ Restore For Relance4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⏰ Check Heure Envoi": {
+      "main": [
+        [
+          {
+            "node": "Peut envoyer ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⏰ Check Heure Envoi1": {
+      "main": [
+        [
+          {
+            "node": "Peut envoyer ?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⏰ Check Heure Envoi2": {
+      "main": [
+        [
+          {
+            "node": "Peut envoyer ?2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📚 Build Conversation Context": {
+      "main": [
+        [
+          {
+            "node": "🤖 Analyse Réponse",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Peut envoyer ?": {
+      "main": [
+        [
+          {
+            "node": "🔁 Relance 1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Peut envoyer ?1": {
+      "main": [
+        [
+          {
+            "node": "RELANCE 2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Peut envoyer ?2": {
+      "main": [
+        [
+          {
+            "node": "RELANCE 3 (FINAL)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔗 Merge Phone Data": {
+      "main": [
+        [
+          {
+            "node": "💬 Send WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "♻️ Restore Data Abandon": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "🔁 Relance 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "♻️ Restore After Log": {
+      "main": [
+        [
+          {
+            "node": "⏱ Wait 6h",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "♻️ Restore After Log1": {
+      "main": [
+        [
+          {
+            "node": "⏱ Wait 24h",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "♻️ Restore Before Save": {
+      "main": [
+        [
+          {
+            "node": "Save Pending Orders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Save Client Temp": {
+      "main": [
+        [
+          {
+            "node": "🔍 Check Doublon",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "👑 Send WhatsApp PLATINUM": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "👑 Send WhatsApp  PREMIUM": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "🔗 Merge Phone Data1": {
+      "main": [
+        [
+          {
+            "node": "🎯 Switch Score VIP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "♻️ Restore Commande": {
+      "main": [
+        [
+          {
+            "node": "⏱ Wait 30min1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "♻️ Restore For Relance2": {
+      "main": [
+        [
+          {
+            "node": "RELANCE ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "♻️ Restore For Relance3": {
+      "main": [
+        [
+          {
+            "node": "Wait24h1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait6": {
+      "main": [
+        [
+          {
+            "node": "🔎 Check Statut 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "♻️ Restore For Relance4": {
+      "main": [
+        [
+          {
+            "node": "RELANCE 3 (FINAL)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait24h1": {
+      "main": [
+        [
+          {
+            "node": "🔎 Check Statut 5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore For Relance": {
+      "main": [
+        [
+          {
+            "node": "🔁 Relance ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "♻️ Restore For Relance": {
+      "main": [
+        [
+          {
+            "node": "Wait6",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "meta": {},
+  "tags": []
+}

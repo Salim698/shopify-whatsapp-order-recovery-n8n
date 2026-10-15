@@ -1,0 +1,14 @@
+{
+  "id": 1000000002,
+  "customer": {
+    "first_name": "Awa",
+    "phone": "22670000000"
+  },
+  "line_items": [
+    { "title": "Produit exemple" }
+  ],
+  "total_price": "550.00",
+  "shipping_address": {
+    "city": "Ouagadougou"
+  }
+}
